@@ -10,16 +10,29 @@ of the same ticker are instant.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 # Allow running without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import streamlit as st
+
+# Streamlit Cloud injects secrets via st.secrets; surface them as env vars
+# BEFORE trading_droppers.config is imported, since config (and the requests
+# session in fundamentals.py) reads SEC_USER_AGENT once at import time.
+try:
+    for _key in ("SEC_USER_AGENT",):
+        if _key in st.secrets and not os.getenv(_key):
+            os.environ[_key] = str(st.secrets[_key])
+except (FileNotFoundError, KeyError, Exception):  # noqa: BLE001
+    # No secrets file locally is fine.
+    pass
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import streamlit as st
 from plotly.subplots import make_subplots
 
 from trading_droppers import db
@@ -269,10 +282,34 @@ def make_chart(ticker: str, prices: pd.DataFrame, ttm: pd.DataFrame) -> go.Figur
 
 # --- app -------------------------------------------------------------------
 
+def _bootstrap_universe() -> None:
+    """Ensure the SQLite schema exists and the universe table is populated.
+
+    Streamlit Cloud spins up a fresh filesystem on each deploy, so the DB built
+    by ``scripts/build_universe.py`` won't be there. Build it inline (idempotent
+    against reruns: once populated, this is a single empty-check SELECT).
+    """
+    db.init_schema()
+    if not db.load_universe().empty:
+        return
+    from trading_droppers import universe  # heavy import, defer to first use
+    with st.status(
+        "First-time setup: building universe (S&P 400/500/600, Nasdaq-100, Russell 2000)...",
+        expanded=True,
+    ) as status:
+        st.write("Fetching index constituents and SEC CIK map...")
+        universe.build_universe()
+        n = len(db.load_universe())
+        status.update(label=f"Universe ready ({n:,} tickers).", state="complete")
+    load_universe_cached.clear()
+
+
 def main() -> None:
     st.set_page_config(page_title="trading-droppers", layout="wide", page_icon="📉")
     st.markdown("# trading-droppers")
     st.caption("Stock dropped, business kept compounding - the de-rating shape.")
+
+    _bootstrap_universe()
 
     with st.sidebar:
         st.subheader("Universe filter")
@@ -289,10 +326,9 @@ def main() -> None:
         )
 
         uni = load_universe_cached(tuple(chosen))
-        if uni.empty:
-            st.warning(
-                "Universe is empty. Run `python scripts/build_universe.py` first."
-            )
+        if uni.empty and not chosen:
+            # _bootstrap_universe ran and still nothing - genuine failure.
+            st.error("Universe build returned no rows. Check the app logs.")
             st.stop()
         if require_cik:
             uni = uni[uni["cik"].notna() & (uni["cik"].astype(str) != "")]

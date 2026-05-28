@@ -77,6 +77,24 @@ streamlit run dashboard/app.py         # explore the results
 
 Start small with `python scripts/run_all.py --limit 50` to smoke-test before scanning the full ~2,500-name universe.
 
+## Deploy to Streamlit Community Cloud
+
+The dashboard runs as-is on [share.streamlit.io](https://share.streamlit.io):
+
+1. **New app** -> point at this repo, branch `main`, main file path `dashboard/app.py`.
+2. Under **Settings -> Secrets**, paste:
+   ```toml
+   SEC_USER_AGENT = "trading-droppers your-email@example.com"
+   ```
+   The dashboard surfaces this as an env var before importing the package, so
+   SEC EDGAR will accept fundamentals requests.
+3. First cold start, the app auto-runs the universe builder (~10 s, behind a
+   status panel). Subsequent runs hit the cached SQLite DB instantly.
+
+Streamlit Cloud's filesystem is ephemeral, so prices and fundamentals are
+re-downloaded on demand whenever a ticker is opened for the first time after
+a container restart. That's normally a few seconds per ticker.
+
 ## Optional: LLM narrative layer
 
 The hard numbers come from XBRL (no LLM needed). If you also want qualitative summaries of the latest 10-K's MD&A / risk factors, enable the pluggable layer:
