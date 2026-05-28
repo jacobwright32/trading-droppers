@@ -11,10 +11,13 @@ venv/
 .env
 .streamlit/secrets.toml
 
-# Generated data (rebuilt by the pipeline) - keep only the .gitkeep
+# Generated data (rebuilt by the pipeline) - keep the .gitkeep and the
+# pre-built per-index ticker parquets that the dashboard loads on startup.
 data/*
 !data/.gitkeep
-*.parquet
+!data/universe/
+data/universe/*
+!data/universe/*.parquet
 
 # OS / editor cruft
 .DS_Store

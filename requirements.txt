@@ -3,6 +3,7 @@ yfinance>=0.2.40
 pandas>=2.0
 numpy>=1.24
 requests>=2.31
+pyarrow>=14.0        # pandas.read_parquet engine for the per-index ticker lists
 lxml>=5.0            # pandas.read_html for Wikipedia index tables
 beautifulsoup4>=4.12 # html parsing fallback
 python-dotenv>=1.0

@@ -36,14 +36,19 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from trading_droppers import db
+from trading_droppers import config
 from trading_droppers import fundamentals as fund_mod
 from trading_droppers import prices as price_mod
-from trading_droppers.db import INDEX_COLUMNS
+
+# Per-index ticker lists - tiny parquets committed to the repo. The dashboard
+# never builds the universe at runtime; it just reads these. Refresh them with
+# ``python scripts/build_universe_parquets.py``.
+UNIVERSE_DIR = config.DATA_DIR / "universe"
 
 INDEX_LABELS: dict[str, str] = {
-    "sp400": "S&P 400",
     "sp500": "S&P 500",
-    "sp600": "S&P 600",
+    "sp400": "S&P 400 (mid-cap)",
+    "sp600": "S&P 600 (small-cap)",
     "nasdaq100": "Nasdaq-100",
     "russell2000": "Russell 2000",
 }
@@ -51,9 +56,29 @@ INDEX_LABELS: dict[str, str] = {
 
 # --- cached data loaders ---------------------------------------------------
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_universe_cached(indices: tuple[str, ...]) -> pd.DataFrame:
-    return db.load_universe(list(indices) if indices else None)
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _load_index_parquet(index_name: str) -> pd.DataFrame:
+    path = UNIVERSE_DIR / f"{index_name}.parquet"
+    if not path.exists():
+        return pd.DataFrame(columns=["ticker", "name", "cik"])
+    df = pd.read_parquet(path)
+    df["index_label"] = INDEX_LABELS.get(index_name, index_name)
+    return df
+
+
+def load_universe_from_parquets(indices: tuple[str, ...]) -> pd.DataFrame:
+    """Union the per-index parquets for the chosen indices, dedupe by ticker."""
+    if not indices:
+        return pd.DataFrame(columns=["ticker", "name", "cik", "index_label"])
+    frames = [_load_index_parquet(i) for i in indices]
+    out = pd.concat([f for f in frames if not f.empty], ignore_index=True)
+    if out.empty:
+        return out
+    # When a ticker appears in multiple selected indices (e.g. S&P 500 +
+    # Nasdaq-100), keep the first listing - which is the higher-priority index
+    # per the order the user picked them.
+    out = out.drop_duplicates(subset="ticker", keep="first")
+    return out.sort_values("ticker").reset_index(drop=True)
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -62,8 +87,8 @@ def load_prices_cached(ticker: str) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_fundamentals_cached(ticker: str) -> pd.DataFrame:
-    return fund_mod.get_fundamentals(ticker)
+def load_fundamentals_cached(ticker: str, cik: str | None) -> pd.DataFrame:
+    return fund_mod.get_fundamentals(ticker, cik=cik)
 
 
 # --- chart math ------------------------------------------------------------
@@ -282,40 +307,20 @@ def make_chart(ticker: str, prices: pd.DataFrame, ttm: pd.DataFrame) -> go.Figur
 
 # --- app -------------------------------------------------------------------
 
-def _bootstrap_universe() -> None:
-    """Ensure the SQLite schema exists and the universe table is populated.
-
-    Streamlit Cloud spins up a fresh filesystem on each deploy, so the DB built
-    by ``scripts/build_universe.py`` won't be there. Build it inline (idempotent
-    against reruns: once populated, this is a single empty-check SELECT).
-    """
-    db.init_schema()
-    if not db.load_universe().empty:
-        return
-    from trading_droppers import universe  # heavy import, defer to first use
-    with st.status(
-        "First-time setup: building universe (S&P 400/500/600, Nasdaq-100, Russell 2000)...",
-        expanded=True,
-    ) as status:
-        st.write("Fetching index constituents and SEC CIK map...")
-        universe.build_universe()
-        n = len(db.load_universe())
-        status.update(label=f"Universe ready ({n:,} tickers).", state="complete")
-    load_universe_cached.clear()
-
-
 def main() -> None:
     st.set_page_config(page_title="trading-droppers", layout="wide", page_icon="📉")
     st.markdown("# trading-droppers")
     st.caption("Stock dropped, business kept compounding - the de-rating shape.")
 
-    _bootstrap_universe()
+    # Ensure the prices/fundamentals cache tables exist. Universe is parquet-based
+    # so we don't touch it here.
+    db.init_schema()
 
     with st.sidebar:
         st.subheader("Universe filter")
         chosen = st.multiselect(
             "Indices",
-            options=list(INDEX_COLUMNS),
+            options=list(INDEX_LABELS.keys()),
             default=["sp500"],
             format_func=lambda c: INDEX_LABELS.get(c, c),
         )
@@ -325,10 +330,11 @@ def main() -> None:
             help="Tickers without a CIK can't be matched to EDGAR fundamentals.",
         )
 
-        uni = load_universe_cached(tuple(chosen))
-        if uni.empty and not chosen:
-            # _bootstrap_universe ran and still nothing - genuine failure.
-            st.error("Universe build returned no rows. Check the app logs.")
+        uni = load_universe_from_parquets(tuple(chosen))
+        if uni.empty:
+            st.warning(
+                "No indices selected (or no parquet files). Pick at least one index."
+            )
             st.stop()
         if require_cik:
             uni = uni[uni["cik"].notna() & (uni["cik"].astype(str) != "")]
@@ -338,6 +344,7 @@ def main() -> None:
 
         tickers = uni["ticker"].tolist()
         name_by_ticker = dict(zip(uni["ticker"], uni["name"].fillna("")))
+        cik_by_ticker = dict(zip(uni["ticker"], uni["cik"].fillna("")))
         default_ticker = "NOW" if "NOW" in tickers else tickers[0]
         choice = st.selectbox(
             "Ticker",
@@ -356,10 +363,11 @@ def main() -> None:
     company = name_by_ticker.get(choice, "")
     st.markdown(f"## {choice} - {company}" if company else f"## {choice}")
 
+    cik = cik_by_ticker.get(choice) or None
     with st.spinner(f"Loading prices for {choice}..."):
         prices = load_prices_cached(choice)
     with st.spinner(f"Loading fundamentals for {choice}..."):
-        fund = load_fundamentals_cached(choice)
+        fund = load_fundamentals_cached(choice, cik)
     ttm = fund_mod.compute_ttm(fund) if fund is not None and not fund.empty else fund
 
     if prices is None or prices.empty:
