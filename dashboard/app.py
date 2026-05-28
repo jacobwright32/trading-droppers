@@ -316,12 +316,23 @@ def main() -> None:
     # so we don't touch it here.
     db.init_schema()
 
+    # If the Screener page handed us an index along with a ticker, make sure
+    # that index is selected on this page BEFORE the multiselect is rendered.
+    handoff_index = st.session_state.pop("index_choice", None)
+    if "indices_pick" not in st.session_state:
+        st.session_state["indices_pick"] = ["sp500"]
+    if handoff_index and handoff_index in INDEX_LABELS:
+        current = list(st.session_state["indices_pick"])
+        if handoff_index not in current:
+            current.append(handoff_index)
+            st.session_state["indices_pick"] = current
+
     with st.sidebar:
         st.subheader("Universe filter")
         chosen = st.multiselect(
             "Indices",
             options=list(INDEX_LABELS.keys()),
-            default=["sp500"],
+            key="indices_pick",
             format_func=lambda c: INDEX_LABELS.get(c, c),
         )
         require_cik = st.checkbox(
@@ -345,7 +356,15 @@ def main() -> None:
         tickers = uni["ticker"].tolist()
         name_by_ticker = dict(zip(uni["ticker"], uni["name"].fillna("")))
         cik_by_ticker = dict(zip(uni["ticker"], uni["cik"].fillna("")))
-        default_ticker = "NOW" if "NOW" in tickers else tickers[0]
+        # If the user landed here from the Screener page via the "View chart"
+        # button, the ticker they picked is in session_state - default to it.
+        handoff = st.session_state.pop("ticker_choice", None)
+        if handoff and handoff in tickers:
+            default_ticker = handoff
+        elif "NOW" in tickers:
+            default_ticker = "NOW"
+        else:
+            default_ticker = tickers[0]
         choice = st.selectbox(
             "Ticker",
             options=tickers,

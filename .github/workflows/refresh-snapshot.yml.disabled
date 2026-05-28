@@ -1,0 +1,50 @@
+# Nightly refresh of data/screening/snapshot.parquet.
+#
+# Disabled by default. To turn on:
+#   1. Rename this file to refresh-snapshot.yml (drop the ".disabled" suffix).
+#   2. In the repo's Settings -> Secrets and variables -> Actions, add
+#      SEC_USER_AGENT (e.g. "trading-droppers your-email@example.com").
+#   3. Commit and push the rename. The schedule fires nightly at 09:00 UTC
+#      (after US markets close); Streamlit Cloud auto-redeploys on the push.
+
+name: Refresh screening snapshot
+
+on:
+  schedule:
+    - cron: "0 9 * * *"  # 09:00 UTC daily (~05:00 US Eastern, after close)
+  workflow_dispatch:      # manual trigger via the Actions tab
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Build snapshot
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: |
+          python scripts/build_screening_snapshot.py \
+            --indices sp500 sp400 sp600 nasdaq100 russell2000
+
+      - name: Commit + push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/screening/snapshot.parquet
+          if git diff --staged --quiet; then
+            echo "No changes to snapshot."
+          else
+            git commit -m "chore: refresh screening snapshot $(date -u +%Y-%m-%d)"
+            git push
+          fi

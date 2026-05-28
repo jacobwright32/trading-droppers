@@ -75,7 +75,23 @@ python scripts/run_all.py
 streamlit run dashboard/app.py         # explore the results
 ```
 
-Start small with `python scripts/run_all.py --limit 50` to smoke-test before scanning the full ~2,500-name universe.
+The dashboard has two pages:
+
+* **Chart** (default) - ServiceNow-style price + stepped revenue band + TTM P/E
+  for any ticker you pick.
+* **Screener** - de-rating candidates ranked by drawdown x revenue YoY,
+  reading the pre-built `data/screening/snapshot.parquet`. Click a row, hit
+  "View chart" -> jumps you to the chart for that ticker.
+
+To rebuild the screener snapshot:
+
+```powershell
+python scripts/build_screening_snapshot.py    # default: sp500 + nasdaq100
+python scripts/build_screening_snapshot.py --indices sp500 sp400 sp600 nasdaq100 russell2000
+```
+
+Then commit and push the resulting `data/screening/snapshot.parquet` -
+Streamlit Cloud will pick it up on the next deploy.
 
 ## Deploy to Streamlit Community Cloud
 

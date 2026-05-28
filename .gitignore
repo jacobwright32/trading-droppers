@@ -12,12 +12,15 @@ venv/
 .streamlit/secrets.toml
 
 # Generated data (rebuilt by the pipeline) - keep the .gitkeep and the
-# pre-built per-index ticker parquets that the dashboard loads on startup.
+# pre-built parquets the dashboard / screener load on startup.
 data/*
 !data/.gitkeep
 !data/universe/
 data/universe/*
 !data/universe/*.parquet
+!data/screening/
+data/screening/*
+!data/screening/*.parquet
 
 # OS / editor cruft
 .DS_Store
