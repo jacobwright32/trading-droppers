@@ -1,0 +1,5 @@
+# Optional - only needed if you enable the LLM narrative layer (TD_LLM_ENABLED=true).
+# The core pipeline (prices + SEC XBRL fundamentals + screens) needs none of these.
+anthropic>=0.40   # when TD_LLM_PROVIDER=anthropic
+openai>=1.40      # when TD_LLM_PROVIDER=openai
+# Ollama (TD_LLM_PROVIDER=ollama) talks to a local HTTP server via `requests`; no package needed.

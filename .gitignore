@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Secrets / local env
+.env
+
+# Generated data (rebuilt by the pipeline) - keep only the .gitkeep
+data/*
+!data/.gitkeep
+*.parquet
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
