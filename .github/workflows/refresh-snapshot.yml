@@ -1,18 +1,21 @@
 # Nightly refresh of data/screening/snapshot.parquet.
 #
-# Disabled by default. To turn on:
-#   1. Rename this file to refresh-snapshot.yml (drop the ".disabled" suffix).
-#   2. In the repo's Settings -> Secrets and variables -> Actions, add
-#      SEC_USER_AGENT (e.g. "trading-droppers your-email@example.com").
-#   3. Commit and push the rename. The schedule fires nightly at 09:00 UTC
-#      (after US markets close); Streamlit Cloud auto-redeploys on the push.
+# Requires SEC_USER_AGENT to be set in:
+#   Settings -> Secrets and variables -> Actions -> New repository secret
+#   Name : SEC_USER_AGENT
+#   Value: trading-droppers your-email@example.com   (use a real email)
+#
+# The snapshot is committed back to main on change; Streamlit Cloud auto-redeploys.
 
 name: Refresh screening snapshot
 
 on:
+  # 09:17 UTC daily. Off-the-hour to avoid the scheduled-jobs queue spike
+  # GitHub serializes at HH:00. By 09:17 UTC, the previous US session has
+  # been closed long enough for yfinance + SEC to have the final numbers.
   schedule:
-    - cron: "0 9 * * *"  # 09:00 UTC daily (~05:00 US Eastern, after close)
-  workflow_dispatch:      # manual trigger via the Actions tab
+    - cron: "17 9 * * *"
+  workflow_dispatch:  # manual trigger from the Actions tab
 
 jobs:
   refresh:
@@ -34,6 +37,10 @@ jobs:
         env:
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
         run: |
+          if [ -z "$SEC_USER_AGENT" ]; then
+            echo "::error::SEC_USER_AGENT secret is not set. See workflow header."
+            exit 1
+          fi
           python scripts/build_screening_snapshot.py \
             --indices sp500 sp400 sp600 nasdaq100 russell2000
 
